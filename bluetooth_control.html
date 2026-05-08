@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>ESP32 扩展板控制</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1a1a2e; color: #eee; min-height: 100vh;
+    display: flex; justify-content: center; align-items: flex-start;
+    padding: 12px;
+}
+.container { width: 100%; max-width: 400px; }
+
+/* 标题 */
+.header { text-align: center; padding: 16px 0 12px; }
+.header h1 { font-size: 22px; color: #fff; }
+.header .sub { font-size: 12px; color: #888; margin-top: 4px; }
+
+/* 通用卡片 */
+.card {
+    background: #16213e; border-radius: 14px;
+    padding: 16px; margin-bottom: 12px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+.card-title {
+    font-size: 13px; color: #aaa; margin-bottom: 10px;
+    text-transform: uppercase; letter-spacing: 1px;
+}
+
+/* 连接区域 */
+.connect-area { text-align: center; }
+.status-dot { display: inline-block; width: 10px; height: 10px;
+    border-radius: 50%; margin-right: 6px; }
+.status-dot.disconnected { background: #e74c3c; }
+.status-dot.connected { background: #2ecc71; animation: pulse 1.5s infinite; }
+@keyframes pulse { 50% { opacity: 0.4; } }
+
+.connect-btn {
+    width: 100%; padding: 14px; border: none; border-radius: 12px;
+    font-size: 16px; font-weight: 600; cursor: pointer;
+    transition: all 0.2s; margin-top: 10px;
+}
+.connect-btn.scan  { background: #0f3460; color: #fff; }
+.connect-btn.connect { background: #2ecc71; color: #000; }
+.connect-btn.disconnect { background: #e74c3c; color: #fff; }
+.connect-btn:active { transform: scale(0.97); opacity: 0.8; }
+
+/* 状态显示区 */
+.state-badge {
+    display: inline-block; padding: 4px 14px; border-radius: 20px;
+    font-size: 14px; font-weight: 600;
+}
+.state-badge.running  { background: #27ae60; }
+.state-badge.setting  { background: #f39c12; }
+.state-badge.complete { background: #e74c3c; }
+
+.info-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 0;
+}
+.info-row .label { font-size: 14px; color: #aaa; }
+.info-row .value { font-size: 22px; font-weight: 700; }
+.info-row .value.blue { color: #3498db; }
+
+.progress-bar {
+    width: 100%; height: 8px; background: #333; border-radius: 4px;
+    margin-top: 8px; overflow: hidden;
+}
+.progress-fill {
+    height: 100%; background: #3498db; border-radius: 4px;
+    transition: width 0.3s;
+}
+
+/* 目标值设置 */
+.target-control {
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+}
+.target-btn {
+    width: 48px; height: 48px; border-radius: 50%; border: 2px solid #555;
+    background: transparent; color: #fff; font-size: 28px;
+    cursor: pointer; display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+}
+.target-btn:active { background: #333; border-color: #3498db; }
+.target-value {
+    font-size: 36px; font-weight: 700; min-width: 80px; text-align: center;
+    color: #fff;
+}
+.target-save {
+    width: 100%; padding: 12px; margin-top: 12px;
+    border: none; border-radius: 10px; font-size: 15px;
+    background: #2980b9; color: #fff; cursor: pointer;
+}
+.target-save:active { opacity: 0.7; }
+
+/* 继电器开关 */
+.relay-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 10px 0;
+}
+.relay-row + .relay-row { border-top: 1px solid #2a2a4a; }
+.relay-label { font-size: 15px; }
+
+/* Toggle 开关 */
+.toggle {
+    position: relative; width: 56px; height: 30px;
+    cursor: pointer;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle .slider {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    background: #555; border-radius: 30px; transition: 0.3s;
+}
+.toggle .slider::before {
+    content: ""; position: absolute; height: 24px; width: 24px;
+    left: 3px; bottom: 3px; background: #fff;
+    border-radius: 50%; transition: 0.3s;
+}
+.toggle input:checked + .slider { background: #2ecc71; }
+.toggle input:checked + .slider::before { transform: translateX(26px); }
+
+/* 命令按钮 */
+.cmd-buttons { display: flex; gap: 10px; flex-wrap: wrap; }
+.cmd-btn {
+    flex: 1; min-width: 90px; padding: 12px; border: none;
+    border-radius: 10px; font-size: 14px; font-weight: 600;
+    cursor: pointer; transition: all 0.15s;
+}
+.cmd-btn:active { transform: scale(0.95); }
+.cmd-btn.reset   { background: #8e44ad; color: #fff; }
+.cmd-btn.start   { background: #27ae60; color: #fff; }
+.cmd-btn.stop    { background: #c0392b; color: #fff; }
+
+.error-msg {
+    color: #e74c3c; font-size: 13px; text-align: center;
+    margin-top: 8px; display: none;
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+    <div class="header">
+        <h1>ESP32 扩展板控制</h1>
+        <div class="sub">蓝牙 BLE 控制面板</div>
+    </div>
+
+    <!-- HTTPS 警告（非安全上下文时显示）-->
+    <div id="httpsWarn" style="display:none;background:#c0392b;color:#fff;padding:14px;border-radius:10px;margin-bottom:12px;font-size:13px;line-height:1.8;">
+        <b>首次使用需要配置 Chrome：</b><br>
+        1. 地址栏打开 <br><code style="background:#000;padding:2px 6px;border-radius:3px;word-break:break-all;">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code><br>
+        2. 输入 <code style="background:#000;padding:2px 6px;border-radius:3px;">http://192.168.4.1</code> 并设为 <b>Enabled</b><br>
+        3. 点击页面底部的 Relaunch 重启 Chrome<br>
+        4. 重新打开本页面即可使用蓝牙控制
+    </div>
+
+    <!-- 连接卡片 -->
+    <div class="card connect-area">
+        <div class="card-title">设备连接</div>
+        <div>
+            <span class="status-dot disconnected" id="dot"></span>
+            <span id="devName" style="font-size:15px;">未连接</span>
+        </div>
+        <button class="connect-btn scan" id="btnConn" onclick="toggleConnection()">
+            扫描并连接
+        </button>
+        <div class="error-msg" id="errMsg"></div>
+    </div>
+
+    <!-- 状态卡片 -->
+    <div class="card">
+        <div class="card-title">系统状态</div>
+        <div style="margin-bottom:10px;">
+            状态：<span class="state-badge running" id="stateBadge">--</span>
+        </div>
+        <div class="info-row">
+            <span class="label">目标值</span>
+            <span class="value" id="infoTarget">--</span>
+        </div>
+        <div class="info-row">
+            <span class="label">当前计数</span>
+            <span class="value blue" id="infoCount">--</span>
+        </div>
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressBar" style="width:0%"></div>
+        </div>
+        <div style="text-align:center;font-size:12px;color:#888;margin-top:4px;">
+            <span id="progressText">--</span>
+        </div>
+    </div>
+
+    <!-- 目标值设置卡片 -->
+    <div class="card">
+        <div class="card-title">目标值设置</div>
+        <div class="target-control">
+            <button class="target-btn" onclick="adjTarget(-1)" title="减1">-</button>
+            <button class="target-btn" onclick="adjTarget(-10)" title="减10" style="font-size:18px;">-10</button>
+            <span class="target-value" id="targetDisp">10</span>
+            <button class="target-btn" onclick="adjTarget(+10)" title="加10" style="font-size:18px;">+10</button>
+            <button class="target-btn" onclick="adjTarget(+1)" title="加1">+</button>
+        </div>
+        <button class="target-save" onclick="saveTarget()">保存目标值到设备</button>
+    </div>
+
+    <!-- 继电器控制卡片 -->
+    <div class="card">
+        <div class="card-title">继电器控制</div>
+        <div class="relay-row">
+            <span class="relay-label">通道 1</span>
+            <label class="toggle">
+                <input type="checkbox" id="relay1" onchange="toggleRelay(1)">
+                <span class="slider"></span>
+            </label>
+        </div>
+        <div class="relay-row">
+            <span class="relay-label">通道 2</span>
+            <label class="toggle">
+                <input type="checkbox" id="relay2" onchange="toggleRelay(2)">
+                <span class="slider"></span>
+            </label>
+        </div>
+    </div>
+
+    <!-- 快捷命令卡片 -->
+    <div class="card">
+        <div class="card-title">快捷操作</div>
+        <div class="cmd-buttons">
+            <button class="cmd-btn reset" onclick="sendCommand(0x01)">&#x21BA; 复位计数</button>
+            <button class="cmd-btn start" onclick="sendCommand(0x02)">&#x25B6; 启动</button>
+            <button class="cmd-btn stop"  onclick="sendCommand(0x03)">&#x25A0; 停止</button>
+        </div>
+    </div>
+
+</div>
+
+<script>
+// ====== 安全上下文检测 ======
+if (!window.isSecureContext || !navigator.bluetooth) {
+    document.getElementById('httpsWarn').style.display = 'block';
+}
+
+// ====== BLE UUID 映射 (16-bit -> 128-bit) ======
+const UUID_BASE = '-0000-1000-8000-00805F9B34FB';
+const SVC   = '0000ff00' + UUID_BASE;
+const CH_TARGET  = '0000ff01' + UUID_BASE;
+const CH_CURRENT = '0000ff02' + UUID_BASE;
+const CH_RELAY1  = '0000ff03' + UUID_BASE;
+const CH_RELAY2  = '0000ff04' + UUID_BASE;
+const CH_STATE   = '0000ff05' + UUID_BASE;
+const CH_COMMAND = '0000ff06' + UUID_BASE;
+
+// ====== 全局变量 ======
+let device = null;
+let server = null;
+let chTarget = null, chCurrent = null, chRelay1 = null,
+    chRelay2 = null, chState = null, chCommand = null;
+let targetVal = 10;
+
+// ====== UI 辅助 ======
+function $(id) { return document.getElementById(id); }
+function showErr(msg) {
+    const e = $('errMsg');
+    e.textContent = msg; e.style.display = msg ? 'block' : 'none';
+}
+
+function setConnected(connected, name) {
+    const dot = $('dot'), btn = $('btnConn'), dev = $('devName');
+    if (connected) {
+        dot.className = 'status-dot connected';
+        btn.textContent = '断开连接';
+        btn.className = 'connect-btn disconnect';
+        dev.textContent = name || '已连接';
+    } else {
+        dot.className = 'status-dot disconnected';
+        btn.textContent = '扫描并连接';
+        btn.className = 'connect-btn scan';
+        dev.textContent = '未连接';
+    }
+}
+
+const STATE_LABELS = { 0: ['running', '运行中'], 1: ['setting', '设置中'], 2: ['complete', '已完成'] };
+
+function updateStateBadge(stateVal) {
+    const badge = $('stateBadge');
+    const info = STATE_LABELS[stateVal] || ['running', '未知'];
+    badge.className = 'state-badge ' + info[0];
+    badge.textContent = info[1];
+}
+
+// ====== BLE 核心连接逻辑 ======
+async function doConnect(dev) {
+    device = dev;
+    device.addEventListener('gattserverdisconnected', onDisconnect);
+
+    server = await device.gatt.connect();
+    const svc = await server.getPrimaryService(SVC);
+
+    chTarget  = await svc.getCharacteristic(CH_TARGET);
+    chCurrent = await svc.getCharacteristic(CH_CURRENT);
+    chRelay1  = await svc.getCharacteristic(CH_RELAY1);
+    chRelay2  = await svc.getCharacteristic(CH_RELAY2);
+    chState   = await svc.getCharacteristic(CH_STATE);
+    chCommand = await svc.getCharacteristic(CH_COMMAND);
+
+    if (chCurrent.properties.notify) {
+        await chCurrent.startNotifications();
+        chCurrent.addEventListener('characteristicvaluechanged', onCountNotify);
+    }
+    if (chState.properties.notify) {
+        await chState.startNotifications();
+        chState.addEventListener('characteristicvaluechanged', onStateNotify);
+    }
+
+    setConnected(true, device.name || 'ESP32_Relay');
+    showErr('');
+    await refreshAll();
+}
+
+async function toggleConnection() {
+    if (device && device.gatt.connected) {
+        await device.gatt.disconnect();
+        device = null; server = null;
+        setConnected(false);
+        return;
+    }
+    try {
+        showErr('');
+        $('btnConn').textContent = '正在扫描...';
+        const dev = await navigator.bluetooth.requestDevice({
+            filters: [{ services: [SVC] }],
+            optionalServices: [SVC]
+        });
+        await doConnect(dev);
+    } catch (err) {
+        if (err.name !== 'NotFoundError') {
+            showErr('连接失败: ' + err.message);
+        }
+        setConnected(false);
+        console.error(err);
+    }
+}
+
+function onDisconnect() {
+    setConnected(false);
+    device = null; server = null;
+    showErr('设备已断开，3秒后尝试自动重连...');
+    setTimeout(autoReconnect, 3000);
+}
+
+// ====== 自动重连 ======
+async function autoReconnect() {
+    if (device && device.gatt.connected) return;
+    $('btnConn').textContent = '自动重连中...';
+    showErr('');
+
+    try {
+        const devices = await navigator.bluetooth.getDevices();
+        for (const dev of devices) {
+            try {
+                await doConnect(dev);
+                return;
+            } catch (e) {
+                // 逐个尝试，失败继续
+            }
+        }
+    } catch (e) {
+        // getDevices 不可用时跳过
+    }
+
+    $('btnConn').textContent = '扫描并连接';
+    $('btnConn').className = 'connect-btn scan';
+    if (!(device && device.gatt.connected)) {
+        showErr('未找到已配对设备，请手动连接');
+    }
+}
+
+// ====== 数据读取 ======
+async function refreshAll() {
+    if (!server || !server.connected) return;
+    try {
+        // 读取目标值
+        const tv = await chTarget.readValue();
+        targetVal = tv.getUint16(0, true);
+        $('targetDisp').textContent = targetVal;
+
+        // 读取当前计数
+        const cv = await chCurrent.readValue();
+        const count = cv.getUint16(0, true);
+        $('infoCount').textContent = count;
+        $('infoTarget').textContent = targetVal;
+        updateProgress(count, targetVal);
+
+        // 读取继电器状态
+        const r1 = await chRelay1.readValue();
+        $('relay1').checked = r1.getUint8(0) === 1;
+        const r2 = await chRelay2.readValue();
+        $('relay2').checked = r2.getUint8(0) === 1;
+
+        // 读取系统状态
+        const sv = await chState.readValue();
+        updateStateBadge(sv.getUint8(0));
+    } catch (e) {
+        console.error('refreshAll error:', e);
+    }
+}
+
+function onCountNotify(event) {
+    const count = event.target.value.getUint16(0, true);
+    $('infoCount').textContent = count;
+    updateProgress(count, targetVal);
+}
+
+function onStateNotify(event) {
+    updateStateBadge(event.target.value.getUint8(0));
+}
+
+function updateProgress(count, target) {
+    const pct = target > 0 ? Math.min(100, Math.round(count / target * 100)) : 0;
+    $('progressBar').style.width = pct + '%';
+    $('progressText').textContent = count + ' / ' + target + ' (' + pct + '%)';
+}
+
+// ====== 目标值设置 ======
+function adjTarget(delta) {
+    targetVal = Math.max(1, Math.min(9999, targetVal + delta));
+    $('targetDisp').textContent = targetVal;
+}
+
+async function saveTarget() {
+    if (!server || !server.connected) { showErr('请先连接设备'); return; }
+    try {
+        const buf = new Uint8Array(2);
+        new DataView(buf.buffer).setUint16(0, targetVal, true);
+        await chTarget.writeValue(buf);
+        $('infoTarget').textContent = targetVal;
+        showErr('');
+    } catch (e) {
+        showErr('写入失败: ' + e.message);
+    }
+}
+
+// ====== 继电器控制 ======
+async function toggleRelay(ch) {
+    if (!server || !server.connected) {
+        showErr('请先连接设备');
+        // 恢复开关状态
+        $(ch === 1 ? 'relay1' : 'relay2').checked = !$(ch === 1 ? 'relay1' : 'relay2').checked;
+        return;
+    }
+    const checkbox = $(ch === 1 ? 'relay1' : 'relay2');
+    const val = checkbox.checked ? 1 : 0;
+    try {
+        const buf = new Uint8Array([val]);
+        await (ch === 1 ? chRelay1 : chRelay2).writeValue(buf);
+        showErr('');
+    } catch (e) {
+        showErr('操作失败: ' + e.message);
+        checkbox.checked = !val;
+    }
+}
+
+// ====== 页面加载自动重连 ======
+window.addEventListener('load', () => {
+    setTimeout(autoReconnect, 500);
+});
+
+// ====== 快捷命令 ======
+async function sendCommand(cmd) {
+    if (!server || !server.connected) { showErr('请先连接设备'); return; }
+    try {
+        await chCommand.writeValue(new Uint8Array([cmd]));
+        showErr('');
+        // 稍后刷新状态
+        setTimeout(refreshAll, 300);
+    } catch (e) {
+        showErr('命令失败: ' + e.message);
+    }
+}
+</script>
+</body>
+</html>
